@@ -10,7 +10,6 @@ Core rules:
 
 from __future__ import annotations
 
-
 SYSTEM_PROMPT = """You are an expert X (Twitter) quote-tweet writer. You produce quote-tweets that link a third-party source (video, podcast, talk, article) to the user's own article.
 
 ## STRUCTURE RULES

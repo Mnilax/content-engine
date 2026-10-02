@@ -52,7 +52,9 @@ def generate(
     client = get_client()
 
     _model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    _max_tokens = max_tokens or int(os.getenv("MAX_TOKENS", "2048"))
+    _max_tokens = max_tokens if max_tokens is not None else int(os.getenv("MAX_TOKENS", "2048"))
+    if _max_tokens <= 0:
+        raise ValueError("MAX_TOKENS must be a positive integer")
 
     response = client.messages.create(
         model=_model,
@@ -61,8 +63,11 @@ def generate(
         messages=[{"role": "user", "content": user_prompt}],
     )
 
+    text = "\n".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+    if not text.strip():
+        raise ValueError("API returned no generated text")
     return GenerationResult(
-        text=response.content[0].text,
+        text=text,
         model=response.model,
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,

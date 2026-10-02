@@ -13,8 +13,8 @@ CLI tool that takes a source (YouTube video, article URL, pasted text) and your 
 - **Thread** — 5-10 tweet breakdown of the source with article bridge
 - **QRT** — sharp 1-3 sentence commentary for quote retweets
 - **Summary card** — structured text block for Telegram/LinkedIn/newsletters
-- **Source extraction** — auto-fetches content from YouTube URLs, web articles, or local files
-- **Anti-duplication** — pass prior quotes to avoid reusing structures in a series
+- **Source extraction** — fetches YouTube page titles/descriptions, web article text, or local files. YouTube transcripts are not extracted; supply a local transcript for speech-based content.
+- **Anti-duplication** — the quote prompt builder accepts `prior_quotes` when called from Python
 
 ## Setup
 
@@ -74,7 +74,16 @@ src/engine/
 
 - Python 3.11+
 - Anthropic API key
-- `anthropic`, `typer`, `rich`, `httpx`
+- `anthropic`, `typer`, `rich`, `httpx`, `python-dotenv` (installed by the setup command)
+
+## Testing
+
+```bash
+pip install -e ".[test]"
+python -m pytest
+```
+
+The tests mock network/API calls; they do not use paid generation.
 
 ## License
 

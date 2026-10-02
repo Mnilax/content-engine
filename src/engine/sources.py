@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from html import unescape
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -33,12 +35,18 @@ def extract_source(url_or_path: str) -> SourceContent:
     Returns:
         SourceContent with extracted text
     """
-    if Path(url_or_path).exists():
-        return _from_file(url_or_path)
-    elif "youtube.com" in url_or_path or "youtu.be" in url_or_path:
-        return _from_youtube(url_or_path)
-    elif url_or_path.startswith("http"):
+    parsed = urlparse(url_or_path)
+    if parsed.scheme in ("http", "https"):
+        hostname = (parsed.hostname or "").lower()
+        if hostname in ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"):
+            return _from_youtube(url_or_path)
         return _from_web(url_or_path)
+    try:
+        is_file = Path(url_or_path).is_file()
+    except OSError:
+        is_file = False
+    if is_file:
+        return _from_file(url_or_path)
     else:
         # Treat as pasted text
         return SourceContent(
@@ -64,17 +72,18 @@ def _from_youtube(url: str) -> SourceContent:
     """Extract YouTube video info from page HTML."""
     try:
         resp = httpx.get(url, follow_redirects=True, timeout=15)
+        resp.raise_for_status()
         html = resp.text
 
         # Extract title
         title_match = re.search(r"<title>(.*?)</title>", html)
-        title = title_match.group(1).replace(" - YouTube", "").strip() if title_match else "YouTube Video"
+        title = unescape(title_match.group(1)).replace(" - YouTube", "").strip() if title_match else "YouTube Video"
 
         # Extract description from meta tag
         desc_match = re.search(
             r'<meta\s+name="description"\s+content="(.*?)"', html
         )
-        description = desc_match.group(1) if desc_match else ""
+        description = unescape(desc_match.group(1)) if desc_match else ""
 
         return SourceContent(
             title=title,
@@ -82,13 +91,8 @@ def _from_youtube(url: str) -> SourceContent:
             url=url,
             source_type="youtube",
         )
-    except Exception as e:
-        return SourceContent(
-            title="YouTube Video",
-            text=f"[Could not fetch: {e}]",
-            url=url,
-            source_type="youtube",
-        )
+    except httpx.HTTPError as e:
+        raise ValueError(f"Could not fetch source: {url}") from e
 
 
 def _from_web(url: str) -> SourceContent:
@@ -100,17 +104,20 @@ def _from_web(url: str) -> SourceContent:
             timeout=15,
             headers={"User-Agent": "Mozilla/5.0 (content-engine)"},
         )
+        resp.raise_for_status()
         html = resp.text
 
         # Extract title
         title_match = re.search(r"<title>(.*?)</title>", html)
-        title = title_match.group(1).strip() if title_match else url
+        title = unescape(title_match.group(1)).strip() if title_match else url
 
         # Strip HTML tags for rough text extraction
-        text = re.sub(r"<script.*?</script>", "", html, flags=re.DOTALL)
-        text = re.sub(r"<style.*?</style>", "", text, flags=re.DOTALL)
+        text = re.sub(r"<script\b.*?</script\s*>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style\b.*?</style\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s+", " ", unescape(text)).strip()
+        if not text:
+            raise ValueError(f"Source has no extractable text: {url}")
 
         # Truncate to reasonable length
         if len(text) > 5000:
@@ -122,10 +129,5 @@ def _from_web(url: str) -> SourceContent:
             url=url,
             source_type="article",
         )
-    except Exception as e:
-        return SourceContent(
-            title=url,
-            text=f"[Could not fetch: {e}]",
-            url=url,
-            source_type="article",
-        )
+    except httpx.HTTPError as e:
+        raise ValueError(f"Could not fetch source: {url}") from e

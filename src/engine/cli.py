@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
+import anthropic
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
+from rich.text import Text
 
-from engine.sources import extract_source
 from engine.formats import FORMAT_REGISTRY
+from engine.sources import extract_source
 
 app = typer.Typer(help="Social Content Engine — repurpose sources into social formats")
 console = Console()
@@ -17,18 +21,30 @@ console = Console()
 
 @app.command()
 def make(
-    url: str = typer.Argument(help="Source URL (YouTube, article, or file path)"),
-    article: Path = typer.Option(None, "--article", "-a", help="Path to your article file"),
-    formats: str = typer.Option("quote", "--formats", "-f", help="Comma-separated: quote,thread,qrt,card"),
-    style: str = typer.Option("long", "--style", "-s", help="Style: long or short (for quote-tweet)"),
-    output: Path = typer.Option(None, "--output", "-o", help="Output directory for generated files"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show prompts without calling API"),
+    url: Annotated[str, typer.Argument(help="Source URL (YouTube, article, or file path)")],
+    article: Annotated[Path | None, typer.Option("--article", "-a", help="Path to your article file")] = None,
+    formats: Annotated[str, typer.Option("--formats", "-f", help="Comma-separated: quote,thread,qrt,card")] = "quote",
+    style: Annotated[str, typer.Option("--style", "-s", help="Style: long or short (for quote-tweet)")] = "long",
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Output directory for generated files")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show prompts without calling API")] = False,
 ):
     """Generate social content from a source URL + your article."""
+    format_keys = list(dict.fromkeys(f.strip() for f in formats.split(",")))
+    unknown = [f for f in format_keys if f not in FORMAT_REGISTRY]
+    if unknown:
+        raise typer.BadParameter(f"Unknown formats: {unknown}. Available: {list(FORMAT_REGISTRY)}", param_hint="--formats")
+    if style not in ("long", "short"):
+        raise typer.BadParameter("Style must be long or short", param_hint="--style")
+    if article is not None and not article.is_file():
+        raise typer.BadParameter("Article file does not exist", param_hint="--article")
     # Extract source
-    console.print(f"[bold]Extracting source:[/bold] {url}")
-    source = extract_source(url)
-    console.print(f"  Title: {source.title}")
+    console.print(f"[bold]Extracting source:[/bold] {escape(url)}")
+    try:
+        source = extract_source(url)
+    except (OSError, ValueError) as e:
+        console.print(str(e), style="red", markup=False)
+        raise typer.Exit(1) from e
+    console.print(f"  Title: {source.title}", markup=False)
     console.print(f"  Type: {source.source_type}")
     console.print(f"  Text length: {len(source.text)} chars")
 
@@ -36,17 +52,9 @@ def make(
     article_text = ""
     if article and article.exists():
         article_text = article.read_text(encoding="utf-8")
-        console.print(f"[bold]Article loaded:[/bold] {article.name} ({len(article_text)} chars)")
+        console.print(f"[bold]Article loaded:[/bold] {escape(article.name)} ({len(article_text)} chars)")
     else:
         console.print("[yellow]No article provided — generating without article context[/yellow]")
-
-    # Parse requested formats
-    format_keys = [f.strip() for f in formats.split(",")]
-    unknown = [f for f in format_keys if f not in FORMAT_REGISTRY]
-    if unknown:
-        console.print(f"[red]Unknown formats: {unknown}[/red]")
-        console.print(f"Available: {list(FORMAT_REGISTRY.keys())}")
-        raise typer.Exit(1)
 
     # Generate each format
     for fmt_key in format_keys:
@@ -63,8 +71,8 @@ def make(
 
         if dry_run:
             console.print(Panel(
-                f"[dim]System prompt:[/dim]\n{fmt['system_prompt'][:200]}...\n\n"
-                f"[dim]User prompt:[/dim]\n{user_prompt[:300]}...",
+                Text(f"System prompt:\n{fmt['system_prompt'][:200]}...\n\n"
+                     f"User prompt:\n{user_prompt[:300]}..."),
                 title=f"DRY RUN: {fmt['name']}",
             ))
             continue
@@ -79,7 +87,7 @@ def make(
             )
 
             console.print(Panel(
-                result.text,
+                Text(result.text),
                 title=f"✅ {fmt['name']}",
                 border_style="green",
             ))
@@ -95,9 +103,9 @@ def make(
                 out_file.write_text(result.text, encoding="utf-8")
                 console.print(f"  [dim]Saved to: {out_file}[/dim]")
 
-        except ValueError as e:
-            console.print(f"[red]API Error: {e}[/red]")
-            console.print("[yellow]Set ANTHROPIC_API_KEY in .env to generate content[/yellow]")
+        except (ValueError, anthropic.APIError, OSError) as e:
+            console.print(f"Generation failed: {e}", style="red", markup=False)
+            raise typer.Exit(1) from e
 
 
 @app.command()
