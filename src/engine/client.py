@@ -51,7 +51,7 @@ def generate(
     """
     client = get_client()
 
-    _model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    _model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     _max_tokens = max_tokens if max_tokens is not None else int(os.getenv("MAX_TOKENS", "2048"))
     if _max_tokens <= 0:
         raise ValueError("MAX_TOKENS must be a positive integer")

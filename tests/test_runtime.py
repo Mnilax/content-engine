@@ -66,9 +66,20 @@ def test_generation_collects_text_blocks(monkeypatch):
         content=[SimpleNamespace(type="thinking"), SimpleNamespace(type="text", text="one"), SimpleNamespace(type="text", text="two")],
         model="mock", usage=SimpleNamespace(input_tokens=1, output_tokens=2),
     )
-    client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: response))
+    calls = []
+    def create(**kwargs):
+        calls.append(kwargs)
+        return response
+    client = SimpleNamespace(messages=SimpleNamespace(create=create))
     monkeypatch.setattr("engine.client.get_client", lambda: client)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
     assert generate("system", "user").text == "one\ntwo"
+    assert calls[-1]["model"] == "claude-sonnet-4-6"
+    monkeypatch.setenv("ANTHROPIC_MODEL", "configured-model")
+    generate("system", "user")
+    assert calls[-1]["model"] == "configured-model"
+    generate("system", "user", model="explicit-model")
+    assert calls[-1]["model"] == "explicit-model"
 
 
 def test_invalid_max_tokens(monkeypatch):
